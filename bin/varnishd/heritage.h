@@ -31,6 +31,9 @@
 
 #include <pthread.h>
 
+#define STREAM_TOKENS_MIN	1U
+#define STREAM_TOKENS_MAX	1000U
+
 struct listen_sock {
 	VTAILQ_ENTRY(listen_sock)	list;
 	int				sock;
@@ -211,6 +214,9 @@ struct params {
 	double			critbit_cooloff;
 
 	double			shortlived;
+
+	unsigned		stream_tokens;
+	unsigned		stream_maxchunksize;
 };
 
 /*
