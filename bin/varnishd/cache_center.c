@@ -429,6 +429,8 @@ DOT	]
 DOT	ERROR -> vcl_error
 DOT	vcl_error-> prepresp [label=deliver]
 DOT }
+DOT vcl_error-> rsterr [label="restart",color=purple]
+DOT rsterr [label="RESTART",shape=plaintext]
  */
 
 static int
@@ -450,13 +452,13 @@ cnt_error(struct sess *sp)
 	w = sp->wrk;
 	if (sp->obj == NULL) {
 		HSH_Prealloc(sp);
-		/* XXX: 1024 is a pure guess */
 		EXP_Clr(&w->exp);
-		sp->obj = STV_NewObject(sp, NULL, 1024, &w->exp,
-		     (uint16_t)params->http_max_hdr);
+		sp->obj = STV_NewObject(sp, NULL, params->http_resp_size,
+		     &w->exp, (uint16_t)params->http_max_hdr);
 		if (sp->obj == NULL)
 			sp->obj = STV_NewObject(sp, TRANSIENT_STORAGE,
-			    1024, &w->exp, (uint16_t)params->http_max_hdr);
+			     params->http_resp_size , &w->exp,
+			     (uint16_t)params->http_max_hdr);
 		if (sp->obj == NULL) {
 			sp->doclose = "Out of objects";
 			sp->director = NULL;
@@ -826,6 +828,7 @@ cnt_fetchbody(struct sess *sp)
 		    (void *)WS_Alloc(sp->obj->http->ws, varyl);
 		AN(sp->obj->vary);
 		memcpy(sp->obj->vary, VSB_data(vary), varyl);
+		VRY_Validate(sp->obj->vary);
 		VSB_delete(vary);
 	}
 
@@ -883,7 +886,7 @@ cnt_fetchbody(struct sess *sp)
 		AN(sp->obj->objcore->ban);
 		HSH_Unbusy(sp);
 	}
-	sp->acct_tmp.fetch++;
+	sp->wrk->acct_tmp.fetch++;
 	sp->step = STP_PREPRESP;
 	return (0);
 }
@@ -1128,7 +1131,7 @@ cnt_first(struct sess *sp)
 	HTC_Init(sp->htc, sp->ws, sp->fd, params->http_req_size,
 	    params->http_req_hdr_len);
 	sp->wrk->lastused = sp->t_open;
-	sp->acct_tmp.sess++;
+	sp->wrk->acct_tmp.sess++;
 
 	sp->step = STP_WAIT;
 	return (0);
@@ -1240,10 +1243,12 @@ cnt_lookup(struct sess *sp)
 		AZ(sp->vary_l);
 		AZ(sp->vary_e);
 		(void)WS_Reserve(sp->ws, 0);
-		sp->vary_b = (void*)sp->ws->f;
-		sp->vary_e = (void*)sp->ws->r;
-		sp->vary_b[2] = '\0';
+	} else {
+		AN(sp->ws->r);
 	}
+	sp->vary_b = (void*)sp->ws->f;
+	sp->vary_e = (void*)sp->ws->r;
+	sp->vary_b[2] = '\0';
 
 	oc = HSH_Lookup(sp, &oh);
 
@@ -1265,10 +1270,14 @@ cnt_lookup(struct sess *sp)
 	if (oc->flags & OC_F_BUSY && !oc->busyobj->can_stream) {
 		sp->wrk->stats.cache_miss++;
 
-		if (sp->vary_l != NULL)
+		if (sp->vary_l != NULL) {
+			assert(oc->busyobj->vary == sp->vary_b);
+			VRY_Validate(oc->busyobj->vary);
 			WS_ReleaseP(sp->ws, (void*)sp->vary_l);
-		else
-			WS_Release(sp->ws, 0);
+		} else {
+			AZ(oc->busyobj->vary);
+			WS_Release(sp->ws, 0); 
+		}
 		sp->vary_b = NULL;
 		sp->vary_l = NULL;
 		sp->vary_e = NULL;
@@ -1430,7 +1439,7 @@ cnt_pass(struct sess *sp)
 		return (0);
 	}
 	assert(sp->handling == VCL_RET_PASS);
-	sp->acct_tmp.pass++;
+	sp->wrk->acct_tmp.pass++;
 	sp->sendbody = 1;
 	sp->step = STP_FETCH;
 	return (0);
@@ -1468,7 +1477,7 @@ cnt_pipe(struct sess *sp)
 	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
 	CHECK_OBJ_NOTNULL(sp->vcl, VCL_CONF_MAGIC);
 
-	sp->acct_tmp.pipe++;
+	sp->wrk->acct_tmp.pipe++;
 	WS_Reset(sp->wrk->ws, NULL);
 	http_Setup(sp->wrk->bereq, sp->wrk->ws);
 	http_FilterHeader(sp, HTTPH_R_PIPE);
@@ -1619,7 +1628,7 @@ cnt_start(struct sess *sp)
 	sp->wrk->stats.client_req++;
 	sp->t_req = TIM_real();
 	sp->wrk->lastused = sp->t_req;
-	sp->acct_tmp.req++;
+	sp->wrk->acct_tmp.req++;
 
 	/* Assign XID and log */
 	sp->xid = ++xids;				/* XXX not locked */
@@ -1775,6 +1784,9 @@ CNT_Session(struct sess *sp)
 	AZ(w->is_gunzip);
 	AZ(w->do_gunzip);
 	AZ(w->do_esi);
+#define ACCT(foo)	AZ(w->acct_tmp.foo);
+#include "acct_fields.h"
+#undef ACCT
 	assert(WRW_IsReleased(w));
 }
 

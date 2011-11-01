@@ -1,6 +1,5 @@
 /*-
- * Copyright (c) 2006 Verdens Gang AS
- * Copyright (c) 2006-2010 Varnish Software AS
+ * Copyright (c) 2011 Varnish Software AS
  * All rights reserved.
  *
  * Author: Poul-Henning Kamp <phk@phk.freebsd.dk>
@@ -26,25 +25,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * Various ways to handle the body coming from the backend.
  */
 
-#include <stdint.h>
-
-#define VSC_CLASS          "Stat"
-
-#define VSC_TYPE_MAIN		""
-#define VSC_TYPE_SMA	"SMA"
-#define VSC_TYPE_SMF	"SMF"
-#define VSC_TYPE_VBE	"VBE"
-#define VSC_TYPE_LCK	"LCK"
-
-#define VSC_F(n, t, l, f, e, d)	t n;
-
-#define VSC_DO(u,l,t) struct VSC_C_##l {
-#define VSC_DONE(u,l,t) };
-
-#include "vsc_all.h"
-
-#undef VSC_DO
-#undef VSC_F
-#undef VSC_DONE
+/*lint -save -e525 -e539 */
+BODYSTATUS(NONE, none)
+BODYSTATUS(ZERO, zero)
+BODYSTATUS(ERROR, error)
+BODYSTATUS(CHUNKED, chunked)
+BODYSTATUS(LENGTH, length)
+BODYSTATUS(EOF, eof)
+/*lint -restore */

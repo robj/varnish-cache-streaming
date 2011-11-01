@@ -80,7 +80,7 @@ static struct lock		stat_mtx;
 void
 SES_Charge(struct sess *sp)
 {
-	struct acct *a = &sp->acct_tmp;
+	struct acct *a = &sp->wrk->acct_tmp;
 
 #define ACCT(foo)				\
 	sp->wrk->stats.s_##foo += a->foo;	\
@@ -250,7 +250,7 @@ SES_NewNonVCA(struct worker *w)
 	sp = &sm->sess;
 	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
 
-	w->stats.n_sess++;
+	VSC_C_main->n_sess++;
 
 	return (sp);
 }
