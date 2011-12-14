@@ -766,7 +766,7 @@ struct storage *FetchStorage(struct worker *w, ssize_t sz);
 int FetchError(struct worker *w, const char *error);
 int FetchError2(struct worker *w, const char *error, const char *more);
 int FetchHdr(struct sess *sp, int need_host_hdr, int sendbody);
-int FetchBody(struct worker *w, struct object *obj);
+int FetchBody(struct worker *w, struct busyobj *bo);
 int FetchReqBody(const struct sess *sp, int sendbody);
 void Fetch_Init(void);
 

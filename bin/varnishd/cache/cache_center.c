@@ -906,7 +906,10 @@ cnt_fetchbody(struct sess *sp, struct worker *wrk, struct req *req)
 	}
 
 	/* Use unmodified headers*/
-	i = FetchBody(wrk, req->obj);
+	AZ(wrk->busyobj->fetch_obj);
+	wrk->busyobj->fetch_obj = req->obj;
+	i = FetchBody(wrk, wrk->busyobj);
+	AZ(wrk->busyobj->fetch_obj);
 
 	http_Setup(wrk->busyobj->bereq, NULL);
 	http_Setup(wrk->busyobj->beresp, NULL);
@@ -975,7 +978,10 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 
 	AssertObjCorePassOrBusy(req->obj->objcore);
 
-	i = FetchBody(wrk, req->obj);
+	AZ(wrk->busyobj->fetch_obj);
+	wrk->busyobj->fetch_obj = req->obj;
+	i = FetchBody(wrk, wrk->busyobj);
+	AZ(wrk->busyobj->fetch_obj);
 
 	http_Setup(wrk->busyobj->bereq, NULL);
 	http_Setup(wrk->busyobj->beresp, NULL);
