@@ -745,6 +745,8 @@ struct busyobj *VBO_GetBusyObj(struct worker *wrk);
 struct busyobj *VBO_RefBusyObj(struct busyobj *busyobj);
 unsigned VBO_DerefBusyObj(struct worker *wrk, struct busyobj **busyobj);
 void VBO_Free(struct vbo **vbo);
+void VBO_LockBusyObj(struct busyobj *busyobj);
+void VBO_UnlockBusyObj(struct busyobj *busyobj);
 void VBO_StreamStopped(struct busyobj *busyobj);
 void VBO_StreamWait(struct busyobj *busyobj);
 void VBO_StreamData(struct busyobj *busyobj);

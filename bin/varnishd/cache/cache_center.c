@@ -287,7 +287,15 @@ cnt_prepresp(struct sess *sp, struct worker *wrk, struct req *req)
 		req->obj->last_use = req->t_resp;	/* XXX: locking ? */
 	}
 	http_Setup(req->resp, req->ws);
-	RES_BuildHttp(sp);
+	if (wrk->busyobj != NULL) {
+		/* We are streaming, read the object headers while
+		 * holding the lock as the fetching thread might
+		 * update these headers (set Content-Length) */
+		VBO_LockBusyObj(wrk->busyobj);
+		RES_BuildHttp(sp);
+		VBO_UnlockBusyObj(wrk->busyobj);
+	} else
+		RES_BuildHttp(sp);
 	VCL_deliver_method(sp);
 	switch (req->handling) {
 	case VCL_RET_DELIVER:

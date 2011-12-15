@@ -209,6 +209,20 @@ VBO_DerefBusyObj(struct worker *wrk, struct busyobj **pbo)
 	return (r);
 }
 
+void
+VBO_LockBusyObj(struct busyobj *busyobj)
+{
+	if (busyobj->use_locks)
+		Lck_Lock(&busyobj->vbo->mtx);
+}
+
+void
+VBO_UnlockBusyObj(struct busyobj *busyobj)
+{
+	if (busyobj->use_locks)
+		Lck_Unlock(&busyobj->vbo->mtx);
+}
+
 /* Signal that the fetch thread has stopped */
 void
 VBO_StreamStopped(struct busyobj *busyobj)

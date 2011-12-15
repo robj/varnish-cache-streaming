@@ -614,9 +614,13 @@ FetchBody(struct worker *wrk, struct busyobj *bo)
 	}
 
 	if (mklen > 0) {
+		/* Lock the busyobj during late header changes, as a
+		 * streaming client may be reading these */
+		VBO_LockBusyObj(bo);
 		http_Unset(obj->http, H_Content_Length);
 		http_PrintfHeader(wrk, bo->vbc->vsl_id, obj->http,
 		    "Content-Length: %zd", obj->len);
+		VBO_UnlockBusyObj(bo);
 	}
 
 	if (cls)
