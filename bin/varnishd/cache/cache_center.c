@@ -957,19 +957,57 @@ DOT }
 DOT streambody -> DONE [style=bold,color=cyan]
  */
 
+/* Background fetch task. Should be called with ref on busyobj, and
+   the objcore if present */
+
+static void
+cnt_streambody_task(struct worker *wrk, void *priv)
+{
+	struct object *obj;
+	struct objcore *objcore;
+	unsigned u;
+
+	AZ(wrk->busyobj);
+	CAST_OBJ_NOTNULL(wrk->busyobj, priv, BUSYOBJ_MAGIC);
+	AN(wrk->busyobj->use_locks);
+
+	CHECK_OBJ_NOTNULL(wrk->busyobj->fetch_obj, OBJECT_MAGIC);
+	AN(wrk->busyobj->vbc);
+	obj = wrk->busyobj->fetch_obj;
+	objcore = obj->objcore;
+
+	wrk->busyobj->fetch_failed = FetchBody(wrk, wrk->busyobj);
+	VBO_StreamStopped(wrk->busyobj);
+
+	AZ(wrk->busyobj->fetch_obj);
+	AZ(wrk->busyobj->vbc);
+	wrk->busyobj->vfp = NULL;
+
+	u = VBO_DerefBusyObj(wrk, &wrk->busyobj);
+	if (objcore != NULL || u == 0) {
+		/* Only deref object if it has it's own refcnt, or we
+		 * were the last to deref the busyobj */
+		(void)HSH_Deref(wrk, NULL, &obj);
+	}
+}
+
 static int
 cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 {
-	int i;
 	struct stream_ctx sctx;
 	uint8_t obuf[sp->wrk->res_mode & RES_GUNZIP ?
 	    cache_param->gzip_stack_buffer : 1];
+	struct busyobj *bo_ex;
+	struct object *obj_ex = NULL;
+	struct pool_task task;
+	unsigned u;
 
 	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
 	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
 
 	CHECK_OBJ_NOTNULL(wrk->busyobj, BUSYOBJ_MAGIC);
+	AN(wrk->busyobj->do_stream);
 	memset(&sctx, 0, sizeof sctx);
 	sctx.magic = STREAM_CTX_MAGIC;
 	AZ(wrk->sctx);
@@ -983,26 +1021,65 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 
 	RES_StreamStart(sp);
 
-	AssertObjCorePassOrBusy(req->obj->objcore);
+	/* MBGXXX: Multiple streaming clients not implemented yet */
+	AssertObjCorePassOrBusy(req->obj->objcore); 
+	if (req->obj->objcore == NULL || req->obj->objcore->flags & OC_F_BUSY) {
+		/* Initiate fetch of object body */
+		AZ(wrk->busyobj->fetch_obj);
+		wrk->busyobj->fetch_obj = req->obj;
+		http_Setup(wrk->busyobj->bereq, NULL);
+		http_Setup(wrk->busyobj->beresp, NULL);
 
-	AZ(wrk->busyobj->fetch_obj);
-	wrk->busyobj->fetch_obj = req->obj;
-	i = FetchBody(wrk, wrk->busyobj);
-	AZ(wrk->busyobj->fetch_obj);
+		/* Prepare for fetch thread */
+		bo_ex = VBO_RefBusyObj(wrk->busyobj);
+		if (req->obj->objcore != NULL) {
+			HSH_Ref(req->obj->objcore);
+			obj_ex = req->obj;
+		}
+		wrk->busyobj->use_locks = 1;
+		task.func = cnt_streambody_task;
+		task.priv = bo_ex;
 
-	http_Setup(wrk->busyobj->bereq, NULL);
-	http_Setup(wrk->busyobj->beresp, NULL);
-	wrk->busyobj->vfp = NULL;
-	AZ(wrk->busyobj->vbc);
-	AN(req->director);
+		if (SES_Task(sp, &task, POOL_NO_QUEUE) < 0) {
+			/* We have no fetch worker - cleanup */
+			wrk->busyobj->use_locks = 0;
+			(void)VBO_DerefBusyObj(wrk, &bo_ex);
+			if (req->obj->objcore != NULL) {
+				AN(obj_ex);
+				(void)HSH_Deref(wrk, NULL, &obj_ex);
+			}
 
-	if (!i && req->obj->objcore != NULL) {
+			/* Fetch the object from this thread */
+			if (req->obj->objcore == NULL ||
+			    req->obj->objcore->flags & OC_F_PASS) {
+				/* It's a pass, prefer flipflop
+				 * streaming. (MBGXXX: Flipflop not
+				 * finished yet) */
+				wrk->busyobj->do_stream_flipflop = 1;
+			} else
+				wrk->busyobj->use_locks = 1;
+
+			wrk->busyobj->fetch_failed =
+				FetchBody(sp->wrk, wrk->busyobj);
+			VBO_StreamStopped(wrk->busyobj);
+		}
+	}
+
+	RES_StreamBody(sp);
+
+	if (wrk->busyobj->htc.ws == wrk->ws)
+		/* Busyobj's htc has buffer on our workspace,
+		   wait for it to be released */
+		VBO_StreamWait(wrk->busyobj);
+
+	if (wrk->busyobj->fetch_failed) {
+		req->doclose = "Stream error";
+	} else if (req->obj->objcore != NULL) {
+		/* MBGXXX: This should be done on the bg task */
 		EXP_Insert(req->obj);
 		AN(req->obj->objcore);
 		AN(req->obj->objcore->ban);
 		HSH_Unbusy(wrk);
-	} else {
-		req->doclose = "Stream error";
 	}
 	wrk->acct_tmp.fetch++;
 	req->director = NULL;
@@ -1015,8 +1092,14 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 	wrk->sctx = NULL;
 	assert(WRW_IsReleased(wrk));
 	assert(wrk->wrw.ciov == wrk->wrw.siov);
-	(void)HSH_Deref(wrk, NULL, &req->obj);
-	(void)VBO_DerefBusyObj(wrk, &wrk->busyobj);
+	u = VBO_DerefBusyObj(wrk, &wrk->busyobj);
+	if (req->obj->objcore != NULL || u == 0) {
+		/* Only deref object if it has it's own refcnt, or we
+		 * were the last to deref the busyobj */
+		(void)HSH_Deref(wrk, NULL, &req->obj);
+	} else
+		/* Object will be deref'ed by fetch thread */
+		req->obj = NULL;
 	http_Setup(req->resp, NULL);
 	sp->step = STP_DONE;
 	return (0);

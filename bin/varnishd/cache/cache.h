@@ -531,6 +531,7 @@ struct busyobj {
 	unsigned		do_gzip;
 	unsigned		do_gunzip;
 	unsigned		do_stream;
+	unsigned		do_stream_flipflop;
 
 	/* Stream stuff */
 	ssize_t			stream_max;
@@ -992,6 +993,8 @@ void WSL_Flush(struct worker *w, int overflow);
 void RES_BuildHttp(const struct sess *sp);
 void RES_WriteObj(struct sess *sp);
 void RES_StreamStart(struct sess *sp);
+void RES_StreamBody(struct sess *sp);
+void RES_StreamWrite(struct sess *sp);
 void RES_StreamEnd(struct sess *sp);
 void RES_StreamPoll(struct worker *wrk);
 

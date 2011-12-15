@@ -366,21 +366,38 @@ RES_StreamStart(struct sess *sp)
 }
 
 void
-RES_StreamPoll(struct worker *wrk)
+RES_StreamBody(struct sess *sp)
 {
 	struct stream_ctx *sctx;
+	struct busyobj *bo;
+
+	sctx = sp->wrk->sctx;
+	CHECK_OBJ_NOTNULL(sctx, STREAM_CTX_MAGIC);
+	bo = sp->wrk->busyobj;
+	CHECK_OBJ_NOTNULL(bo, BUSYOBJ_MAGIC);
+	AN(sp->req->wantbody);
+
+	while (!sctx->stream_stopped || sctx->stream_next < sctx->stream_max)  {
+		VBO_StreamSync(sp->wrk);
+		RES_StreamWrite(sp);
+	}
+}
+
+void
+RES_StreamWrite(struct sess *sp)
+{
+	struct worker *wrk;
+	struct stream_ctx *sctx;
 	struct storage *st;
-	struct object *fetch_obj;
 	ssize_t l, l2, stlen;
 	void *ptr;
 
+	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+	wrk = sp->wrk;
 	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 	CHECK_OBJ_NOTNULL(wrk->sp->req->obj, OBJECT_MAGIC);
 	sctx = wrk->sctx;
 	CHECK_OBJ_NOTNULL(sctx, STREAM_CTX_MAGIC);
-
-	VBO_StreamData(wrk->busyobj);
-	VBO_StreamSync(wrk);
 
 	if (sctx->stream_max == sctx->stream_next)
 		return;
@@ -418,23 +435,6 @@ RES_StreamPoll(struct worker *wrk)
 	}
 	if (!(wrk->res_mode & RES_GUNZIP))
 		(void)WRW_Flush(wrk);
-
-	if (wrk->busyobj->stream_frontchunk == NULL)
-		return;
-
-	/* It's a pass - remove chunks already delivered */
-	fetch_obj = wrk->busyobj->fetch_obj;
-	CHECK_OBJ_NOTNULL(fetch_obj, OBJECT_MAGIC);
-	assert(fetch_obj->objcore == NULL ||
-	       (fetch_obj->objcore->flags & OC_F_PASS));
-	while (1) {
-		st = VTAILQ_FIRST(&fetch_obj->store);
-		if (st == NULL || st == wrk->busyobj->stream_frontchunk)
-			break;
-		CHECK_OBJ_NOTNULL(st, STORAGE_MAGIC);
-		VTAILQ_REMOVE(&fetch_obj->store, st, list);
-		STV_free(st);
-	}
 }
 
 void
@@ -452,4 +452,44 @@ RES_StreamEnd(struct sess *sp)
 		WRW_EndChunk(sp->wrk);
 	if (WRW_FlushRelease(sp->wrk))
 		SES_Close(sp, "remote closed");
+}
+
+void
+RES_StreamPoll(struct worker *wrk)
+{
+	struct object *fetch_obj;
+	struct storage *st;
+
+	CHECK_OBJ_NOTNULL(wrk->busyobj, BUSYOBJ_MAGIC);
+
+	VBO_StreamData(wrk->busyobj);
+	if (wrk->busyobj->do_stream_flipflop == 1) {
+		AN(wrk->sctx);
+		/* MBGXXX: Do flip-flop streaming */
+		/* MBGXXX: Loop around waiting for the lag behind to
+		 * be less than some configurable size, to keep the
+		 * cache memory usage low (this for streaming
+		 * extremely large objects with pass) */
+		VBO_StreamSync(wrk);
+		RES_StreamWrite(wrk->sp);
+	}
+
+	if (wrk->busyobj->stream_frontchunk == NULL)
+		return;
+
+	/* It's a pass - remove chunks already delivered. Should be OK
+	 * to do lock-free, as we are not fiddling pointers of any
+	 * storage chunk passed busyobj->stream_frontchunk */
+	fetch_obj = wrk->busyobj->fetch_obj;
+	CHECK_OBJ_NOTNULL(fetch_obj, OBJECT_MAGIC);
+	assert(fetch_obj->objcore == NULL ||
+	       (fetch_obj->objcore->flags & OC_F_PASS));
+	while (1) {
+		st = VTAILQ_FIRST(&fetch_obj->store);
+		if (st == NULL || st == wrk->busyobj->stream_frontchunk)
+			break;
+		CHECK_OBJ_NOTNULL(st, STORAGE_MAGIC);
+		VTAILQ_REMOVE(&fetch_obj->store, st, list);
+		STV_free(st);
+	}
 }
