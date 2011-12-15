@@ -269,7 +269,7 @@ struct stream_ctx {
 	/* Next byte we will take from storage */
 	ssize_t			stream_next;
 
-	/* First byte of storage if we free it as we go (pass) */
+	/* Point in storage chunk chain we have reached */
 	ssize_t			stream_front;
 	struct storage		*stream_frontchunk;
 
@@ -991,7 +991,7 @@ void RES_BuildHttp(const struct sess *sp);
 void RES_WriteObj(struct sess *sp);
 void RES_StreamStart(struct sess *sp);
 void RES_StreamEnd(struct sess *sp);
-void RES_StreamPoll(struct worker *);
+void RES_StreamPoll(struct worker *wrk);
 
 /* cache_vary.c */
 struct vsb *VRY_Create(const struct sess *sp, const struct http *hp);
