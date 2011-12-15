@@ -837,6 +837,15 @@ static const struct parspec input_parspec[] = {
 		"fragmentation.\n",
 		EXPERIMENTAL,
 		"256m", "bytes" },
+	{ "stream_maxchunksize",
+		tweak_bytes_u,
+		    &mgt_param.stream_maxchunksize, 4 * 1024, UINT_MAX,
+		"The maximum chunksize we attempt to allocate from storage "
+		"when streaming. This also defines the intervals at which "
+		"the streaming clients receive notifications about new "
+		"data available.\n",
+		EXPERIMENTAL,
+		"256k", "bytes" },
 #ifdef SENDFILE_WORKS
 	{ "sendfile_threshold",
 		tweak_bytes, &mgt_param.sendfile_threshold, 0, HUGE_VAL,

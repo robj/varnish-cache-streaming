@@ -189,6 +189,8 @@ FetchStorage(struct worker *wrk, ssize_t sz)
 		l = sz;
 	if (l == 0)
 		l = cache_param->fetch_chunksize;
+	if (wrk->busyobj->do_stream && l > cache_param->stream_maxchunksize)
+		l = cache_param->stream_maxchunksize;
 	st = STV_alloc(wrk, l);
 	if (st == NULL) {
 		(void)FetchError(wrk, "Could not get storage");
