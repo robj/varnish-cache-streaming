@@ -271,6 +271,13 @@ struct stream_ctx {
 
 	/* First byte of storage if we free it as we go (pass) */
 	ssize_t			stream_front;
+	struct storage		*stream_frontchunk;
+
+	/* Max byte we can stream */
+	ssize_t			stream_max;
+
+	/* Backend fetch has finished */
+	unsigned		stream_stopped;
 };
 
 /*--------------------------------------------------------------------*/
@@ -524,6 +531,11 @@ struct busyobj {
 	unsigned		do_gzip;
 	unsigned		do_gunzip;
 	unsigned		do_stream;
+
+	/* Stream stuff */
+	ssize_t			stream_max;
+	struct storage		*stream_frontchunk;
+	unsigned		stream_stopped;
 };
 
 /* Object structure --------------------------------------------------*/
@@ -733,6 +745,10 @@ struct busyobj *VBO_GetBusyObj(struct worker *wrk);
 struct busyobj *VBO_RefBusyObj(struct busyobj *busyobj);
 unsigned VBO_DerefBusyObj(struct worker *wrk, struct busyobj **busyobj);
 void VBO_Free(struct vbo **vbo);
+void VBO_StreamStopped(struct busyobj *busyobj);
+void VBO_StreamWait(struct busyobj *busyobj);
+void VBO_StreamData(struct busyobj *busyobj);
+void VBO_StreamSync(struct worker *wrk);
 
 /* cache_center.c [CNT] */
 void CNT_Session(struct sess *sp);

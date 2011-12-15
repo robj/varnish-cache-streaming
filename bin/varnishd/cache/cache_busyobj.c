@@ -208,3 +208,94 @@ VBO_DerefBusyObj(struct worker *wrk, struct busyobj **pbo)
 
 	return (r);
 }
+
+/* Signal that the fetch thread has stopped */
+void
+VBO_StreamStopped(struct busyobj *busyobj)
+{
+	if (!busyobj->use_locks) {
+		busyobj->stream_stopped = 1;
+		return;
+	}
+	Lck_Lock(&busyobj->vbo->mtx);
+	busyobj->stream_stopped = 1;
+	AZ(pthread_cond_broadcast(&busyobj->vbo->cond));
+	Lck_Unlock(&busyobj->vbo->mtx);
+}
+
+/* Wait for the fetch thread to finish reading the pipeline buffer */
+void
+VBO_StreamWait(struct busyobj *busyobj)
+{
+	if (!busyobj->use_locks)
+		return;
+	Lck_Lock(&busyobj->vbo->mtx);
+	while (busyobj->htc.pipeline.b != NULL && busyobj->stream_stopped == 0)
+		Lck_CondWait(&busyobj->vbo->cond, &busyobj->vbo->mtx, NULL);
+	Lck_Unlock(&busyobj->vbo->mtx);
+}
+
+/* Signal additional data available */
+void
+VBO_StreamData(struct busyobj *busyobj)
+{
+	CHECK_OBJ_NOTNULL(busyobj, BUSYOBJ_MAGIC);
+	CHECK_OBJ_NOTNULL(busyobj->fetch_obj, OBJECT_MAGIC);
+
+	if (busyobj->use_locks)
+		Lck_Lock(&busyobj->vbo->mtx);
+	assert(busyobj->fetch_obj->len >= busyobj->stream_max);
+	if (busyobj->fetch_obj->len > busyobj->stream_max) {
+		busyobj->stream_max = busyobj->fetch_obj->len;
+		if (busyobj->use_locks)
+			AZ(pthread_cond_broadcast(&busyobj->vbo->cond));
+	}
+	if (busyobj->use_locks)
+		Lck_Unlock(&busyobj->vbo->mtx);
+}
+
+/* Sync the client's stream_ctx with the busyobj, and block on no more
+ * data available */
+void
+VBO_StreamSync(struct worker *wrk)
+{
+	struct busyobj *busyobj;
+	struct stream_ctx *sctx;
+
+	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
+	CHECK_OBJ_NOTNULL(wrk->busyobj, BUSYOBJ_MAGIC);
+	busyobj = wrk->busyobj;
+	CHECK_OBJ_NOTNULL(wrk->sp, SESS_MAGIC);
+	CHECK_OBJ_NOTNULL(wrk->sp->req, REQ_MAGIC);
+	CHECK_OBJ_NOTNULL(wrk->sp->req->obj, OBJECT_MAGIC);
+	CHECK_OBJ_NOTNULL(wrk->sctx, STREAM_CTX_MAGIC);
+	sctx = wrk->sctx;
+
+	if (busyobj->use_locks)
+		Lck_Lock(&busyobj->vbo->mtx);
+	assert(sctx->stream_max <= busyobj->stream_max);
+
+	if (wrk->sp->req->obj->objcore == NULL ||
+	    (wrk->sp->req->obj->objcore->flags & OC_F_PASS)) {
+		/* Give notice to backend fetch that we are finished
+		 * with all chunks before this one */
+		busyobj->stream_frontchunk = sctx->stream_frontchunk;
+	}
+
+	sctx->stream_stopped = busyobj->stream_stopped;
+	sctx->stream_max = busyobj->stream_max;
+
+	if (busyobj->use_locks && !sctx->stream_stopped &&
+	    sctx->stream_next == sctx->stream_max) {
+		while (!busyobj->stream_stopped &&
+		       sctx->stream_max == busyobj->stream_max) {
+			Lck_CondWait(&busyobj->vbo->cond, &busyobj->vbo->mtx,
+				     NULL);
+		}
+		sctx->stream_stopped = busyobj->stream_stopped;
+		sctx->stream_max = busyobj->stream_max;
+	}
+
+	if (busyobj->use_locks)
+		Lck_Unlock(&busyobj->vbo->mtx);
+}
