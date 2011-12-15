@@ -42,6 +42,7 @@ struct vbo {
 	unsigned		magic;
 #define VBO_MAGIC		0xde3d8223
 	struct lock		mtx;
+	pthread_cond_t		cond;
 	unsigned		refcount;
 	uint16_t		nhttp;
 	struct busyobj		bo;
@@ -80,6 +81,7 @@ vbo_New(void)
 	vbo->magic = VBO_MAGIC;
 	vbo->nhttp = nhttp;
 	Lck_New(&vbo->mtx, lck_busyobj);
+	AZ(pthread_cond_init(&vbo->cond, NULL));
 	return (vbo);
 }
 
@@ -94,6 +96,7 @@ VBO_Free(struct vbo **vbop)
 	CHECK_OBJ_NOTNULL(vbo, VBO_MAGIC);
 	AZ(vbo->refcount);
 	Lck_Delete(&vbo->mtx);
+	AZ(pthread_cond_destroy(&vbo->cond));
 	FREE_OBJ(vbo);
 }
 
