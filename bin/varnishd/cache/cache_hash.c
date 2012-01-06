@@ -306,6 +306,7 @@ HSH_Lookup(struct sess *sp, struct objhead **poh)
 	AN(sp->req->director);
 	AN(hash);
 	wrk = sp->wrk;
+	AZ(wrk->busyobj);
 
 	HSH_Prealloc(sp);
 	memcpy(sp->wrk->nobjhead->digest, sp->req->digest,
@@ -459,7 +460,7 @@ HSH_Lookup(struct sess *sp, struct objhead **poh)
 		wrk->busyobj->vary = sp->req->vary_b;
 	else
 		wrk->busyobj->vary = NULL;
-	oc->busyobj = wrk->busyobj;
+	oc->busyobj = VBO_RefBusyObj(wrk->busyobj);
 
 	/*
 	 * Busy objects go on the tail, so they will not trip up searches.
@@ -622,7 +623,8 @@ HSH_Unbusy(struct worker *wrk)
 	VTAILQ_REMOVE(&oh->objcs, oc, list);
 	VTAILQ_INSERT_HEAD(&oh->objcs, oc, list);
 	oc->flags &= ~OC_F_BUSY;
-	oc->busyobj = NULL;
+	if (oc->busyobj != NULL)
+		(void)VBO_DerefBusyObj(wrk, &oc->busyobj);
 	if (oh->waitinglist != NULL)
 		hsh_rush(oh);
 	AN(oc->ban);
@@ -709,6 +711,10 @@ HSH_Deref(struct worker *wrk, struct objcore *oc, struct object **oo)
 
 	BAN_DestroyObj(oc);
 	AZ(oc->ban);
+
+	if (oc->busyobj != NULL)
+		(void)VBO_DerefBusyObj(wrk, &oc->busyobj);
+	AZ(oc->busyobj);
 
 	if (oc->methods != NULL) {
 		oc_freeobj(oc);

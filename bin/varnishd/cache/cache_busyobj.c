@@ -144,21 +144,25 @@ VBO_GetBusyObj(struct worker *wrk)
 	return (&vbo->bo);
 }
 
-void
-VBO_RefBusyObj(const struct busyobj *busyobj)
+struct busyobj *
+VBO_RefBusyObj(struct busyobj *busyobj)
 {
 	struct vbo *vbo;
 
 	CHECK_OBJ_NOTNULL(busyobj, BUSYOBJ_MAGIC);
 	vbo = busyobj->vbo;
 	CHECK_OBJ_NOTNULL(vbo, VBO_MAGIC);
-	Lck_Lock(&vbo->mtx);
+	if (busyobj->use_locks)
+		Lck_Lock(&vbo->mtx);
 	assert(vbo->refcount > 0);
 	vbo->refcount++;
-	Lck_Unlock(&vbo->mtx);
+	if (busyobj->use_locks)
+		Lck_Unlock(&vbo->mtx);
+
+	return (busyobj);
 }
 
-void
+unsigned
 VBO_DerefBusyObj(struct worker *wrk, struct busyobj **pbo)
 {
 	struct busyobj *bo;
@@ -172,10 +176,12 @@ VBO_DerefBusyObj(struct worker *wrk, struct busyobj **pbo)
 	CHECK_OBJ_NOTNULL(bo, BUSYOBJ_MAGIC);
 	vbo = bo->vbo;
 	CHECK_OBJ_NOTNULL(vbo, VBO_MAGIC);
-	Lck_Lock(&vbo->mtx);
+	if (bo->use_locks)
+		Lck_Lock(&vbo->mtx);
 	assert(vbo->refcount > 0);
 	r = --vbo->refcount;
-	Lck_Unlock(&vbo->mtx);
+	if (bo->use_locks)
+		Lck_Unlock(&vbo->mtx);
 
 	if (r == 0) {
 		/* XXX: Sanity checks & cleanup */
@@ -196,4 +202,6 @@ VBO_DerefBusyObj(struct worker *wrk, struct busyobj **pbo)
 				VBO_Free(&vbo);
 		}
 	}
+
+	return (r);
 }

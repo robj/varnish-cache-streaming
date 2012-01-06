@@ -495,6 +495,7 @@ struct busyobj {
 	unsigned		magic;
 #define BUSYOBJ_MAGIC		0x23b95567
 	struct vbo		*vbo;
+	unsigned		use_locks;
 
 	uint8_t			*vary;
 	unsigned		is_gzip;
@@ -728,8 +729,8 @@ double BAN_Time(const struct ban *ban);
 /* cache_busyobj.c */
 void VBO_Init(void);
 struct busyobj *VBO_GetBusyObj(struct worker *wrk);
-void VBO_RefBusyObj(const struct busyobj *busyobj);
-void VBO_DerefBusyObj(struct worker *wrk, struct busyobj **busyobj);
+struct busyobj *VBO_RefBusyObj(struct busyobj *busyobj);
+unsigned VBO_DerefBusyObj(struct worker *wrk, struct busyobj **busyobj);
 void VBO_Free(struct vbo **vbo);
 
 /* cache_center.c [CNT] */
