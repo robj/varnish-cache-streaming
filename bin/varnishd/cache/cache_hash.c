@@ -63,6 +63,8 @@
 
 static const struct hash_slinger *hash;
 
+static void hsh_rush(struct objhead *oh);
+
 /*---------------------------------------------------------------------*/
 /* Precreate an objhead and object for later use */
 void
@@ -414,6 +416,13 @@ HSH_Lookup(struct sess *sp, struct objhead **poh)
 		if (o->hits < INT_MAX)
 			o->hits++;
 		assert(oh->refcnt > 1);
+		if (oc->busyobj != NULL) {
+			/* It's streamable */
+			CHECK_OBJ_NOTNULL(oc->busyobj, BUSYOBJ_MAGIC);
+			wrk->busyobj = VBO_RefBusyObj(oc->busyobj);
+			if (oh->waitinglist != NULL)
+				hsh_rush(oh);
+		}
 		Lck_Unlock(&oh->mtx);
 		assert(hash->deref(oh));
 		*poh = oh;
@@ -623,13 +632,35 @@ HSH_Unbusy(struct worker *wrk)
 	VTAILQ_REMOVE(&oh->objcs, oc, list);
 	VTAILQ_INSERT_HEAD(&oh->objcs, oc, list);
 	oc->flags &= ~OC_F_BUSY;
-	if (oc->busyobj != NULL)
+	if (oc->busyobj->do_stream == 0)
 		(void)VBO_DerefBusyObj(wrk, &oc->busyobj);
 	if (oh->waitinglist != NULL)
 		hsh_rush(oh);
 	AN(oc->ban);
 	Lck_Unlock(&oh->mtx);
 	assert(oc_getobj(wrk, oc) == o);
+}
+
+/*---------------------------------------------------------------------
+ * Drop the objcore's ref on the busyobj while holding the objhead mutex
+ */
+
+void
+HSH_RemoveBusyObj(struct worker *wrk, struct objcore *oc)
+{
+	struct objhead *oh;
+
+	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
+	CHECK_OBJ_NOTNULL(oc, OBJCORE_MAGIC);
+	oh = oc->objhead;
+	CHECK_OBJ_NOTNULL(oh, OBJHEAD_MAGIC);
+
+	AZ(oc->flags & OC_F_BUSY);
+	AN(oc->busyobj);
+	assert(oc->busyobj->do_stream == 0 || oc->busyobj->stream_stopped == 1);
+	Lck_Lock(&oh->mtx);
+	(void)VBO_DerefBusyObj(wrk, &oc->busyobj);
+	Lck_Unlock(&oh->mtx);
 }
 
 void

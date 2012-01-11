@@ -514,8 +514,6 @@ FetchBody(struct worker *wrk, struct busyobj *bo)
 	if (bo->vfp == NULL)
 		bo->vfp = &vfp_nop;
 
-	AssertObjCorePassOrBusy(obj->objcore);
-
 	AZ(bo->vgz_rx);
 	AZ(VTAILQ_FIRST(&obj->store));
 

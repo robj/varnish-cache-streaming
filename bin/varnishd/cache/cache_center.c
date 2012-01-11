@@ -226,7 +226,6 @@ cnt_prepresp(struct sess *sp, struct worker *wrk, struct req *req)
 	if (wrk->busyobj != NULL) {
 		CHECK_OBJ_NOTNULL(wrk->busyobj, BUSYOBJ_MAGIC);
 		AN(wrk->busyobj->do_stream);
-		AssertObjCorePassOrBusy(req->obj->objcore);
 	}
 
 	wrk->res_mode = 0;
@@ -303,14 +302,17 @@ cnt_prepresp(struct sess *sp, struct worker *wrk, struct req *req)
 	case VCL_RET_RESTART:
 		if (req->restarts >= cache_param->max_restarts)
 			break;
-		if (wrk->busyobj != NULL) {
+		if (wrk->busyobj != NULL &&
+		    (req->obj->objcore == NULL ||
+		     req->obj->objcore->flags & OC_F_BUSY)) {
 			AN(wrk->busyobj->do_stream);
 			VDI_CloseFd(wrk, &wrk->busyobj->vbc);
 			HSH_Drop(wrk);
-			(void)VBO_DerefBusyObj(wrk, &wrk->busyobj);
 		} else {
 			(void)HSH_Deref(wrk, NULL, &req->obj);
 		}
+		if (wrk->busyobj != NULL)
+			(void)VBO_DerefBusyObj(wrk, &wrk->busyobj);
 		AZ(req->obj);
 		req->restarts++;
 		req->director = NULL;
@@ -320,8 +322,8 @@ cnt_prepresp(struct sess *sp, struct worker *wrk, struct req *req)
 	default:
 		WRONG("Illegal action in vcl_deliver{}");
 	}
-	if (wrk->busyobj != NULL && wrk->busyobj->do_stream) {
-		AssertObjCorePassOrBusy(req->obj->objcore);
+	if (wrk->busyobj != NULL) {
+		AN(wrk->busyobj->do_stream);
 		sp->step = STP_STREAMBODY;
 	} else {
 		sp->step = STP_DELIVER;
@@ -981,6 +983,11 @@ cnt_streambody_task(struct worker *wrk, void *priv)
 
 	wrk->stats.fetch_threaded++;
 
+	if (obj->objcore != NULL) {
+		HSH_RemoveBusyObj(wrk, obj->objcore);
+		if (wrk->busyobj->fetch_failed == 0)
+			EXP_Insert(obj);
+	}
 	AZ(wrk->busyobj->fetch_obj);
 	AZ(wrk->busyobj->vbc);
 	wrk->busyobj->vfp = NULL;
@@ -1023,8 +1030,6 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 
 	RES_StreamStart(sp);
 
-	/* MBGXXX: Multiple streaming clients not implemented yet */
-	AssertObjCorePassOrBusy(req->obj->objcore); 
 	if (req->obj->objcore == NULL || req->obj->objcore->flags & OC_F_BUSY) {
 		/* Initiate fetch of object body */
 		wrk->acct_tmp.fetch++;
@@ -1038,6 +1043,11 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 		if (req->obj->objcore != NULL) {
 			HSH_Ref(req->obj->objcore);
 			obj_ex = req->obj;
+
+			/* Unbusy the object */
+			AN(req->obj->objcore->ban);
+			HSH_Unbusy(wrk);
+			AN(req->obj->objcore->busyobj);
 		}
 		wrk->busyobj->use_locks = 1;
 		task.func = cnt_streambody_task;
@@ -1064,26 +1074,35 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 				wrk->busyobj->use_locks = 1;
 
 			wrk->busyobj->fetch_failed =
-				FetchBody(sp->wrk, wrk->busyobj);
+				FetchBody(wrk, wrk->busyobj);
 			VBO_StreamStopped(wrk->busyobj);
+
+			if (req->obj->objcore != NULL) {
+				HSH_RemoveBusyObj(wrk, req->obj->objcore);
+				if (wrk->busyobj->fetch_failed == 0)
+					EXP_Insert(req->obj);
+			}
+			AZ(wrk->busyobj->fetch_obj);
+			AZ(wrk->busyobj->vbc);
+			wrk->busyobj->vfp = NULL;
+			VBO_StreamSync(wrk);
 		}
 	}
 
-	RES_StreamBody(sp);
+	if (wrk->busyobj->do_stream_flipflop == 0)
+		RES_StreamBody(sp);
+	else
+		AN(wrk->sctx->stream_stopped);
 
-	if (wrk->busyobj->htc.ws == wrk->ws)
+	if (wrk->busyobj->htc.ws == wrk->ws) {
 		/* Busyobj's htc has buffer on our workspace,
 		   wait for it to be released */
+		AZ(wrk->busyobj->do_stream_flipflop);
 		VBO_StreamWait(wrk->busyobj);
+	}
 
 	if (wrk->busyobj->fetch_failed) {
 		req->doclose = "Stream error";
-	} else if (req->obj->objcore != NULL) {
-		/* MBGXXX: This should be done on the bg task */
-		EXP_Insert(req->obj);
-		AN(req->obj->objcore);
-		AN(req->obj->objcore->ban);
-		HSH_Unbusy(wrk);
 	}
 	req->director = NULL;
 	req->restarts = 0;
@@ -1180,7 +1199,6 @@ cnt_hit(struct sess *sp, struct worker *wrk, struct req *req)
 	CHECK_OBJ_NOTNULL(req->obj, OBJECT_MAGIC);
 	CHECK_OBJ_NOTNULL(req->vcl, VCL_CONF_MAGIC);
 	AZ(req->objcore);
-	AZ(wrk->busyobj);
 
 	assert(!(req->obj->objcore->flags & OC_F_PASS));
 
@@ -1324,6 +1342,8 @@ cnt_lookup(struct sess *sp, struct worker *wrk, struct req *req)
 		WSP(sp, SLT_HitPass, "%u", req->obj->xid);
 		(void)HSH_Deref(wrk, NULL, &req->obj);
 		AZ(req->objcore);
+		if (wrk->busyobj != NULL)
+			(void)VBO_DerefBusyObj(wrk, &wrk->busyobj);
 		sp->step = STP_PASS;
 		return (0);
 	}
