@@ -465,7 +465,6 @@ RES_StreamPoll(struct worker *wrk)
 	VBO_StreamData(wrk->busyobj);
 	if (wrk->busyobj->do_stream_flipflop == 1) {
 		AN(wrk->sctx);
-		/* MBGXXX: Do flip-flop streaming */
 		/* MBGXXX: Loop around waiting for the lag behind to
 		 * be less than some configurable size, to keep the
 		 * cache memory usage low (this for streaming

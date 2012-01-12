@@ -1065,9 +1065,6 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 			/* Fetch the object from this thread */
 			if (req->obj->objcore == NULL ||
 			    req->obj->objcore->flags & OC_F_PASS) {
-				/* It's a pass, prefer flipflop
-				 * streaming. (MBGXXX: Flipflop not
-				 * finished yet) */
 				wrk->busyobj->do_stream_flipflop = 1;
 				wrk->stats.fetch_flipflop++;
 			} else
@@ -1097,7 +1094,6 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 	if (wrk->busyobj->htc.ws == wrk->ws) {
 		/* Busyobj's htc has buffer on our workspace,
 		   wait for it to be released */
-		AZ(wrk->busyobj->do_stream_flipflop);
 		VBO_StreamWait(wrk->busyobj);
 	}
 
