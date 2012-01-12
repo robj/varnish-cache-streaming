@@ -791,11 +791,14 @@ The following variables are available after the requested object has
 been retrieved from the backend, before it is entered into the cache. In
 other words, they are available in vcl_fetch:
 
-beresp.do_stream 
+beresp.do_stream
   Deliver the object to the client directly without fetching the whole
   object into varnish. If this request is pass'ed it will not be
-  stored in memory. As of Varnish Cache 3.0 the object will marked as busy
-  as it is delivered so only client can access the object.
+  stored in memory (up to *stream_pass_bufsize*).
+
+beresp.stream_pass_bufsize
+  When passing and streaming, do not use more than this amount of
+  cache space.
 
 beresp.do_esi
   Boolean. ESI-process the object after fetching it. Defaults to
@@ -936,6 +939,46 @@ then retry other backends to try to fetch the object again.
 If there are no more backends or if you hit *max_restarts* and we have
 an object that is younger than what you set beresp.saintmode to be
 Varnish will serve the object, even if it is stale.
+
+Streaming
+---------
+
+When setting the beresp.do_stream flag to true in vcl_fetch, you
+instruct Varnish to stream the object to the client. This means that
+(after receiving the backend headers), the object body will be
+delivered to the client while it is received from the backend. For
+non-passes, the object is not busy while receiving the data from the
+backend, and any subsequent requests for the object will be served the
+content as it is received from the backend.
+
+For streaming passes, Varnish has a configurable buffer size for the
+data that is read from the backend connection and will be passed on to
+the client. This is useful for limiting the cache space usage when
+passing large static objects, which would otherwise purge most of the
+cache content to make room for the temporary object. Varnish will then
+read only up to this buffer size from the backend, and then stall the
+connection until the the data has been delivered to the client. The
+pass buffer size defaults to *stream_pass_bufsize*, but can also be
+set per request through VCL in vcl_fetch by setting
+beresp.stream_pass_bufsize. If the resource cost on the backend of
+keeping the connection open is high, you might want to keep the time
+this connection is kept open down to a minimum also for passes. This
+can be achieved by setting *stream_pass_bufsize* to zero, which means
+unlimited.
+
+Varnish will use an additional worker thread for the backend body
+fetch when streaming. This thread is taken from the idle worker list,
+with a configurable wait timeout. If an idle thread is not found
+within *stream_grab_timeout* milliseconds, Varnish will fetch the body
+content from the requesting thread instead. For passes, the fall-back
+mechanism will be a flip-flop style streaming, where the thread
+alternates between reading data from the backend connection and
+writing to the client connection. For non-passes the entire body will
+be fetched in one go from the client thread, before writing the data
+to the client (much the same as a non-streamed case). The object will
+not be busy while reading the body though, and subsequent requesting
+clients for the same object will deliver the streamed body content as
+it is read from the backend.
 
 EXAMPLES
 ========
