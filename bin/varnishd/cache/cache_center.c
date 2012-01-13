@@ -979,6 +979,8 @@ cnt_streambody_task(struct worker *wrk, void *priv)
 	wrk->busyobj->fetch_failed = FetchBody(wrk, wrk->busyobj);
 	VBO_StreamStopped(wrk->busyobj);
 
+	wrk->stats.fetch_threaded++;
+
 	AZ(wrk->busyobj->fetch_obj);
 	AZ(wrk->busyobj->vbc);
 	wrk->busyobj->vfp = NULL;
@@ -1025,6 +1027,7 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 	AssertObjCorePassOrBusy(req->obj->objcore); 
 	if (req->obj->objcore == NULL || req->obj->objcore->flags & OC_F_BUSY) {
 		/* Initiate fetch of object body */
+		wrk->acct_tmp.fetch++;
 		AZ(wrk->busyobj->fetch_obj);
 		wrk->busyobj->fetch_obj = req->obj;
 		http_Setup(wrk->busyobj->bereq, NULL);
@@ -1056,6 +1059,7 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 				 * streaming. (MBGXXX: Flipflop not
 				 * finished yet) */
 				wrk->busyobj->do_stream_flipflop = 1;
+				wrk->stats.fetch_flipflop++;
 			} else
 				wrk->busyobj->use_locks = 1;
 
@@ -1081,11 +1085,11 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 		AN(req->obj->objcore->ban);
 		HSH_Unbusy(wrk);
 	}
-	wrk->acct_tmp.fetch++;
 	req->director = NULL;
 	req->restarts = 0;
 
 	RES_StreamEnd(sp);
+	wrk->acct_tmp.streamed++;
 	if (wrk->res_mode & RES_GUNZIP)
 		(void)VGZ_Destroy(&sctx.vgz, sp->vsl_id);
 

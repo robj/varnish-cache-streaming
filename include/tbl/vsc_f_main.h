@@ -143,6 +143,8 @@ VSC_F(fetch_failed,		uint64_t, 1, 'a', "Fetch failed", "")
 VSC_F(fetch_1xx,		uint64_t, 1, 'a', "Fetch no body (1xx)", "")
 VSC_F(fetch_204,		uint64_t, 1, 'a', "Fetch no body (204)", "")
 VSC_F(fetch_304,		uint64_t, 1, 'a', "Fetch no body (304)", "")
+VSC_F(fetch_threaded,		uint64_t, 1, 'a', "Fetch threaded", "")
+VSC_F(fetch_flipflop,		uint64_t, 1, 'a', "Fetch flipflop", "")
 
 /*---------------------------------------------------------------------
  * Pools, threads, and sessions
@@ -251,6 +253,7 @@ VSC_F(s_req,			uint64_t, 1, 'a', "Total Requests", "")
 VSC_F(s_pipe,			uint64_t, 1, 'a', "Total pipe", "")
 VSC_F(s_pass,			uint64_t, 1, 'a', "Total pass", "")
 VSC_F(s_fetch,			uint64_t, 1, 'a', "Total fetch", "")
+VSC_F(s_streamed,		uint64_t, 1, 'a', "Total streamed delivery", "")
 VSC_F(s_hdrbytes,		uint64_t, 1, 'a', "Total header bytes", "")
 VSC_F(s_bodybytes,		uint64_t, 1, 'a', "Total body bytes", "")
 
