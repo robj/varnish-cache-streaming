@@ -295,14 +295,15 @@ VBO_StreamSync(struct worker *wrk)
 	    (wrk->sp->req->obj->objcore->flags & OC_F_PASS)) {
 		/* Give notice to backend fetch that we are finished
 		 * with all chunks before this one */
+		assert(busyobj->stream_next <= sctx->stream_next);
+		busyobj->stream_next = sctx->stream_next;
 		busyobj->stream_frontchunk = sctx->stream_frontchunk;
 	}
 
 	sctx->stream_stopped = busyobj->stream_stopped;
 	sctx->stream_max = busyobj->stream_max;
 
-	if (busyobj->use_locks && !sctx->stream_stopped &&
-	    sctx->stream_next == sctx->stream_max) {
+	if (busyobj->use_locks && sctx->stream_next == sctx->stream_max) {
 		while (!busyobj->stream_stopped &&
 		       sctx->stream_max == busyobj->stream_max) {
 			Lck_CondWait(&busyobj->vbo->cond, &busyobj->vbo->mtx,
