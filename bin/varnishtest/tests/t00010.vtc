@@ -1,0 +1,68 @@
+varnishtest "Test streaming recepient in pass mode with low bufsize"
+
+server s1 {
+	rxreq
+	txresp -nolen -hdr "Transfer-encoding: chunked"
+	chunkedlen 1024
+	sema r1 sync 2
+	chunkedlen 1024
+	sema r2 sync 2
+	chunkedlen 1024
+	sema r1 sync 2
+	chunkedlen 1024
+	sema r2 sync 2
+	chunkedlen 0
+} -repeat 2 -start
+
+# First test with flip-flop
+varnish v1 -arg "-p thread_pools=1 -p thread_pool_min=2 -p thread_pool_max=2" -vcl+backend {
+	sub vcl_recv {
+		return (pass);
+	}
+
+	sub vcl_fetch {
+		set beresp.do_stream = true;
+		set beresp.stream_pass_bufsize = 8B;
+	}
+} -start
+
+client c1 {
+	txreq -hdr "foo: /foo"
+	rxresp -no_obj
+
+	rxchunk
+	expect resp.chunklen == 1024
+	sema r1 sync 2
+
+	rxchunk
+	expect resp.chunklen == 1024
+	sema r2 sync 2
+
+	rxchunk
+	expect resp.chunklen == 1024
+	sema r1 sync 2
+
+	rxchunk
+	expect resp.chunklen == 1024
+	sema r2 sync 2
+
+	rxchunk
+	expect resp.chunklen == 0
+	expect resp.bodylen == 4096
+} -run
+
+# Allow thread creation so next test will be with fetch thread
+varnish v1 -cliok "param.set thread_pool_max 4"
+varnish v1 -cliok "param.set thread_pool_min 4"
+
+# Wait for additional threads to be created
+delay 1
+
+client c1 -run
+
+# Allow statistics to get ajour before testing
+delay 0.1
+
+varnish v1 -expect fetch_threaded == 1
+varnish v1 -expect fetch_flipflop == 1
+varnish v1 -expect s_streamed == 2
