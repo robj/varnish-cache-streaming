@@ -1,0 +1,45 @@
+varnishtest "Test flipflop streaming"
+
+server s1 {
+	rxreq
+	txresp -nolen -hdr "Transfer-encoding: chunked"
+	chunked "<1>------------------------<1>\n"
+	sema r1 sync 2
+	chunked "<2>------------------------<2>\n"
+	sema r2 sync 2
+	chunkedlen 0
+} -start
+
+varnish v1 -arg "-p thread_pools=1 -p thread_pool_min=2 -p thread_pool_max=2 -p stream_grab_timeout=0 -p thread_pool_add_threshold=1" -vcl+backend {
+	sub vcl_recv {
+		return (pass);
+	}
+
+	sub vcl_fetch {
+		set beresp.do_stream = true;
+	}
+} -start
+
+client c1 {
+	txreq -hdr "foo: /foo"
+	rxresp -no_obj
+
+	rxchunk
+	expect resp.chunklen == 31
+	sema r1 sync 2
+
+	rxchunk
+	expect resp.chunklen == 31
+	sema r2 sync 2
+
+	rxchunk
+	expect resp.chunklen == 0
+	expect resp.bodylen == 62
+} -run
+
+varnish v1 -expect threadgrab_idle == 0
+varnish v1 -expect threadgrab_waiting == 0
+varnish v1 -expect threadgrab_failed == 1
+varnish v1 -expect fetch_threaded == 0
+varnish v1 -expect fetch_flipflop == 1
+varnish v1 -expect s_streamed == 1
