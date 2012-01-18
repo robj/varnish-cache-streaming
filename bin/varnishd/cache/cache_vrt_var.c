@@ -301,6 +301,25 @@ VRT_l_beresp_storage(struct sess *sp, const char *str, ...)
 	sp->req->storage_hint = b;
 }
 
+double
+VRT_r_beresp_stream_pass_bufsize(const struct sess *sp)
+{
+	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+	CHECK_OBJ_NOTNULL(sp->wrk->busyobj, BUSYOBJ_MAGIC);
+	return (sp->wrk->busyobj->stream_pass_bufsize);
+}
+
+void
+VRT_l_beresp_stream_pass_bufsize(const struct sess *sp, double val)
+{
+	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+	CHECK_OBJ_NOTNULL(sp->wrk->busyobj, BUSYOBJ_MAGIC);
+	if (val >= 0.)
+		sp->wrk->busyobj->stream_pass_bufsize = val;
+	else
+		sp->wrk->busyobj->stream_pass_bufsize = 0;
+}
+
 /*--------------------------------------------------------------------*/
 
 void

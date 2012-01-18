@@ -846,6 +846,12 @@ static const struct parspec input_parspec[] = {
 		"data available.\n",
 		EXPERIMENTAL,
 		"256k", "bytes" },
+	{ "stream_pass_bufsize",
+		tweak_bytes_u, &mgt_param.stream_pass_bufsize, 0, UINT_MAX,
+		"Default max amount of data to buffer when streaming passes. "
+		"Zero means unlimited.\n",
+		EXPERIMENTAL,
+		"10mb", "bytes" },
 #ifdef SENDFILE_WORKS
 	{ "sendfile_threshold",
 		tweak_bytes, &mgt_param.sendfile_threshold, 0, HUGE_VAL,

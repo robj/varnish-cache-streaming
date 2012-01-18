@@ -99,6 +99,8 @@ struct params {
 	ssize_t			fetch_chunksize;
 	ssize_t			fetch_maxchunksize;
 	ssize_t			stream_maxchunksize;
+	ssize_t			stream_pass_bufsize;
+
 	unsigned		nuke_limit;
 
 #ifdef SENDFILE_WORKS

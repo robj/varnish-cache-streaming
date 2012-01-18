@@ -1,0 +1,33 @@
+varnishtest "Test streaming vcl syntax"
+
+server s1 {
+	rxreq
+	txresp
+} -start
+
+varnish v1 -arg "-p stream_pass_bufsize=1M" -vcl+backend {
+	sub vcl_fetch {
+		set beresp.do_stream = true;
+		set beresp.http.spb-orig = beresp.stream_pass_bufsize;
+		set beresp.stream_pass_bufsize = 1024B;
+		set beresp.stream_pass_bufsize = 1KB;
+		set beresp.stream_pass_bufsize = 10MB;
+		set beresp.stream_pass_bufsize = 1GB;
+		set beresp.stream_pass_bufsize = 0B - 1B;
+		set beresp.http.spb = beresp.stream_pass_bufsize;
+	}
+} -start
+
+client c1 {
+	txreq
+	rxresp
+	expect resp.http.spb-orig == "1048576.000"
+	expect resp.http.spb == "0.000"
+} -run
+
+varnish v1 -badvcl {
+	backend default { .host = "127.0.0.1"; }
+	sub vcl_fetch {
+		set beresp.stream_pass_bufsize = 0;
+	}
+}

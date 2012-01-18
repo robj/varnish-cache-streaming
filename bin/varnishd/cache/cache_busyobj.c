@@ -144,6 +144,8 @@ VBO_GetBusyObj(struct worker *wrk)
 	p += HTTP_estimate(vbo->nhttp);
 	vbo->bo.beresp = HTTP_create(p, vbo->nhttp);
 
+	vbo->bo.stream_pass_bufsize = cache_param->stream_pass_bufsize;
+
 	return (&vbo->bo);
 }
 

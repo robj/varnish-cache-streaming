@@ -537,6 +537,7 @@ struct busyobj {
 	ssize_t			stream_max;
 	struct storage		*stream_frontchunk;
 	unsigned		stream_stopped;
+	ssize_t			stream_pass_bufsize;
 };
 
 /* Object structure --------------------------------------------------*/
