@@ -100,6 +100,8 @@ struct params {
 	ssize_t			fetch_maxchunksize;
 	ssize_t			stream_maxchunksize;
 	ssize_t			stream_pass_bufsize;
+	unsigned		stream_tokens;
+	unsigned		stream_token_timeout;
 
 	unsigned		nuke_limit;
 

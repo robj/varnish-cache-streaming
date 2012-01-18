@@ -278,6 +278,9 @@ struct stream_ctx {
 
 	/* Backend fetch has finished */
 	unsigned		stream_stopped;
+
+	/* Are we currently holding a token from the busyobj */
+	unsigned		has_token;
 };
 
 /*--------------------------------------------------------------------*/
@@ -539,6 +542,7 @@ struct busyobj {
 	volatile struct storage	*stream_frontchunk;
 	unsigned		stream_stopped;
 	ssize_t			stream_pass_bufsize;
+	unsigned		stream_tokens;
 };
 
 /* Object structure --------------------------------------------------*/
@@ -754,6 +758,7 @@ void VBO_StreamStopped(struct busyobj *busyobj);
 void VBO_StreamWait(struct busyobj *busyobj);
 void VBO_StreamData(struct busyobj *busyobj);
 void VBO_StreamSync(struct worker *wrk);
+void VBO_ReleaseToken(struct worker *wrk, struct busyobj *busyobj);
 
 /* cache_center.c [CNT] */
 void CNT_Session(struct sess *sp);

@@ -38,11 +38,19 @@
 
 #include "cache.h"
 
+struct tokenwait {
+	unsigned		magic;
+#define TOKENWAIT_MAGIC		0x97803067
+	struct worker		*wrk;
+	VTAILQ_ENTRY(tokenwait)	list;
+};
+
 struct vbo {
 	unsigned		magic;
 #define VBO_MAGIC		0xde3d8223
 	struct lock		mtx;
 	pthread_cond_t		cond;
+	VTAILQ_HEAD(, tokenwait) token_wait_queue;
 	unsigned		refcount;
 	uint16_t		nhttp;
 	struct busyobj		bo;
@@ -50,6 +58,9 @@ struct vbo {
 
 static struct lock vbo_mtx;
 static struct vbo *nvbo;
+
+static void vbo_acquire_token(struct worker *wrk, struct busyobj *busyobj);
+static void vbo_release_token(struct worker *wrk, struct busyobj *busyobj);
 
 void
 VBO_Init(void)
@@ -82,6 +93,7 @@ vbo_New(void)
 	vbo->nhttp = nhttp;
 	Lck_New(&vbo->mtx, lck_busyobj);
 	AZ(pthread_cond_init(&vbo->cond, NULL));
+	VTAILQ_INIT(&vbo->token_wait_queue);
 	return (vbo);
 }
 
@@ -145,6 +157,7 @@ VBO_GetBusyObj(struct worker *wrk)
 	vbo->bo.beresp = HTTP_create(p, vbo->nhttp);
 
 	vbo->bo.stream_pass_bufsize = cache_param->stream_pass_bufsize;
+	vbo->bo.stream_tokens = cache_param->stream_tokens;
 
 	return (&vbo->bo);
 }
@@ -291,6 +304,11 @@ VBO_StreamSync(struct worker *wrk)
 		Lck_Lock(&busyobj->vbo->mtx);
 	assert(sctx->stream_max <= busyobj->stream_max);
 
+	if (sctx->has_token)
+		/* Release token to give other clients that has
+		 * reached the end of data a chance */
+		vbo_release_token(wrk, busyobj);
+
 	if (wrk->sp->req->obj->objcore == NULL ||
 	    (wrk->sp->req->obj->objcore->flags & OC_F_PASS)) {
 		/* Give notice to backend fetch that we are finished
@@ -303,8 +321,11 @@ VBO_StreamSync(struct worker *wrk)
 	sctx->stream_stopped = busyobj->stream_stopped;
 	sctx->stream_max = busyobj->stream_max;
 
-	if (busyobj->use_locks && sctx->stream_next == sctx->stream_max) {
-		while (!busyobj->stream_stopped &&
+	if (busyobj->use_locks && !sctx->stream_stopped &&
+	    sctx->stream_next == sctx->stream_max) {
+		/* We've exhausted available data, wait for more */
+		vbo_acquire_token(wrk, busyobj);
+		while (sctx->has_token && !busyobj->stream_stopped &&
 		       sctx->stream_max == busyobj->stream_max) {
 			Lck_CondWait(&busyobj->vbo->cond, &busyobj->vbo->mtx,
 				     NULL);
@@ -315,4 +336,87 @@ VBO_StreamSync(struct worker *wrk)
 
 	if (busyobj->use_locks)
 		Lck_Unlock(&busyobj->vbo->mtx);
+}
+
+/* Acquire a token for the worker from the busyobj. If none available,
+   wait for stream_token_timeout ms on the queue.
+   wrk->sctx->has_token will be true if succesful */
+static void
+vbo_acquire_token(struct worker *wrk, struct busyobj *busyobj)
+{
+	struct tokenwait tw;
+	struct timespec ts;
+
+	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
+	CHECK_OBJ_NOTNULL(wrk->sctx, STREAM_CTX_MAGIC);
+	AZ(wrk->sctx->has_token);
+	CHECK_OBJ_NOTNULL(busyobj, BUSYOBJ_MAGIC);
+	AN(busyobj->use_locks);
+
+	if (busyobj->stream_tokens > 0) {
+		busyobj->stream_tokens--;
+		wrk->sctx->has_token = 1;
+		return;
+	}
+
+	AZ(clock_gettime(CLOCK_REALTIME, &ts));
+	ts.tv_sec += cache_param->stream_token_timeout / 1000;
+	ts.tv_nsec += (cache_param->stream_token_timeout % 1000) * 1000000;
+	if (ts.tv_nsec >= 1000000000) {
+		ts.tv_sec++;
+		ts.tv_nsec -= 1000000000;
+	}
+
+	memset(&tw, 0, sizeof tw);
+	tw.magic = TOKENWAIT_MAGIC;
+	tw.wrk = wrk;
+	VTAILQ_INSERT_TAIL(&busyobj->vbo->token_wait_queue, &tw, list);
+	Lck_CondWait(&wrk->cond, &busyobj->vbo->mtx, &ts);
+	if (wrk->sctx->has_token == 0) {
+		VTAILQ_REMOVE(&busyobj->vbo->token_wait_queue, &tw, list);
+		wrk->stats.n_tokentimeout++;
+	}
+}
+
+/* Release our currently held token, passing it on to the first on the
+   queue if the queue is non-empty. Resets wrk->sctx->has_token */
+static void
+vbo_release_token(struct worker *wrk, struct busyobj *busyobj)
+{
+	struct tokenwait *ptw;
+
+	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
+	CHECK_OBJ_NOTNULL(wrk->sctx, STREAM_CTX_MAGIC);
+	AN(wrk->sctx->has_token);
+	CHECK_OBJ_NOTNULL(busyobj, BUSYOBJ_MAGIC);
+	AN(busyobj->use_locks);
+
+	ptw = VTAILQ_FIRST(&busyobj->vbo->token_wait_queue);
+	if (ptw != NULL) {
+		/* Transfer our token to the first on the waiting
+		   list, and wake it */
+		CHECK_OBJ_NOTNULL(ptw, TOKENWAIT_MAGIC);
+		CHECK_OBJ_NOTNULL(ptw->wrk, WORKER_MAGIC);
+		CHECK_OBJ_NOTNULL(ptw->wrk->sctx, STREAM_CTX_MAGIC);
+		VTAILQ_REMOVE(&busyobj->vbo->token_wait_queue, ptw, list);
+		AZ(ptw->wrk->sctx->has_token);
+		ptw->wrk->sctx->has_token = 1;
+		AZ(pthread_cond_signal(&ptw->wrk->cond));
+	} else {
+		busyobj->stream_tokens++;
+	}
+
+	wrk->sctx->has_token = 0;
+}
+
+void
+VBO_ReleaseToken(struct worker *wrk, struct busyobj *busyobj)
+{
+	CHECK_OBJ_NOTNULL(busyobj, BUSYOBJ_MAGIC);
+
+	if (busyobj->use_locks == 0)
+		return;
+	Lck_Lock(&busyobj->vbo->mtx);
+	vbo_release_token(wrk, busyobj);
+	Lck_Unlock(&busyobj->vbo->mtx);
 }

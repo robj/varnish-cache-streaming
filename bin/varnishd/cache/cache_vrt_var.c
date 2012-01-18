@@ -320,6 +320,26 @@ VRT_l_beresp_stream_pass_bufsize(const struct sess *sp, double val)
 		sp->wrk->busyobj->stream_pass_bufsize = 0;
 }
 
+int
+VRT_r_beresp_stream_tokens(const struct sess *sp)
+{
+	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+	CHECK_OBJ_NOTNULL(sp->wrk->busyobj, BUSYOBJ_MAGIC);
+	return (sp->wrk->busyobj->stream_tokens);
+}
+
+void
+VRT_l_beresp_stream_tokens(const struct sess *sp, int val)
+{
+	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+	CHECK_OBJ_NOTNULL(sp->wrk->busyobj, BUSYOBJ_MAGIC);
+	if (val >= 1)
+		sp->wrk->busyobj->stream_tokens = val;
+	else
+		sp->wrk->busyobj->stream_tokens = 1;
+}
+
+
 /*--------------------------------------------------------------------*/
 
 void

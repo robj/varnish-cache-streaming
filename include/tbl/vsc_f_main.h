@@ -247,6 +247,9 @@ VSC_F(n_objwrite,		uint64_t, 0, 'a', "Objects sent with write",
       "or if the sendfile call has been disabled")
 VSC_F(n_objoverflow,	uint64_t, 1, 'a',
 					"Objects overflowing workspace", "")
+VSC_F(n_tokentimeout,	uint64_t, 1, 'a', "Token wait timeouts",
+      "The number of times a fast streaming client has timed out waiting for "
+      "token to be notified about new incoming data.")
 
 VSC_F(s_sess,			uint64_t, 1, 'a', "Total Sessions", "")
 VSC_F(s_req,			uint64_t, 1, 'a', "Total Requests", "")

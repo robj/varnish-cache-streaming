@@ -1091,6 +1091,10 @@ cnt_streambody(struct sess *sp, struct worker *wrk, struct req *req)
 	else
 		AN(wrk->sctx->stream_stopped);
 
+	if (wrk->sctx->has_token)
+		VBO_ReleaseToken(wrk, wrk->busyobj);
+	AZ(wrk->sctx->has_token);
+
 	if (wrk->busyobj->htc.ws == wrk->ws) {
 		/* Busyobj's htc has buffer on our workspace,
 		   wait for it to be released */

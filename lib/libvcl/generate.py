@@ -337,6 +337,12 @@ sp_variables = (
 		( 'fetch',),
 		'const struct sess *'
 	),
+	('beresp.stream_tokens',
+		'INT',
+		( 'fetch',),
+		( 'fetch',),
+		'const struct sess *'
+	),
 	('beresp.ttl',
 		'DURATION',
 		( 'fetch',),

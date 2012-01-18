@@ -852,6 +852,18 @@ static const struct parspec input_parspec[] = {
 		"Zero means unlimited.\n",
 		EXPERIMENTAL,
 		"10mb", "bytes" },
+	{ "stream_tokens",
+		tweak_uint, &mgt_param.stream_tokens, 1, UINT_MAX,
+		"Default number of tokens available for racing streaming "
+		"clients.\n",
+		EXPERIMENTAL,
+		"10", "tokens" },
+	{ "stream_token_timeout",
+		tweak_uint, &mgt_param.stream_token_timeout, 1, UINT_MAX,
+		"Timeout for acquiring token during streaming and waiting "
+		"for more data.\n",
+		EXPERIMENTAL,
+		"100", "ms" },
 #ifdef SENDFILE_WORKS
 	{ "sendfile_threshold",
 		tweak_bytes, &mgt_param.sendfile_threshold, 0, HUGE_VAL,
