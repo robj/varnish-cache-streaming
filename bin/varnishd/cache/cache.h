@@ -517,7 +517,8 @@ struct busyobj {
 	struct vef_priv		*vef_priv;
 
 	unsigned		should_close;
-	char			*h_content_length;
+	unsigned		has_content_length;
+	ssize_t			content_length;
 
 	unsigned		do_esi;
 	unsigned		do_gzip;
@@ -763,6 +764,7 @@ int EXP_Touch(struct objcore *oc);
 int EXP_NukeOne(struct worker *w, struct lru *lru);
 
 /* cache_fetch.c */
+ssize_t FetchNumber(const char *nbr, int radix);
 struct storage *FetchStorage(struct worker *w, ssize_t sz);
 int FetchError(struct worker *w, const char *error);
 int FetchError2(struct worker *w, const char *error, const char *more);

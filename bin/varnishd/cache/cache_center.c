@@ -235,8 +235,7 @@ cnt_prepresp(struct sess *sp, struct worker *wrk, struct req *req)
 		wrk->res_mode |= RES_LEN;
 
 	if (wrk->busyobj != NULL &&
-	    (wrk->busyobj->h_content_length != NULL ||
-	    !wrk->busyobj->do_stream) &&
+	    (wrk->busyobj->has_content_length || !wrk->busyobj->do_stream) &&
 	    !wrk->busyobj->do_gzip && !wrk->busyobj->do_gunzip)
 		wrk->res_mode |= RES_LEN;
 

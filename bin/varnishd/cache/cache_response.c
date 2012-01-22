@@ -353,9 +353,10 @@ RES_StreamStart(struct sess *sp)
 		http_Unset(sp->req->resp, H_Content_Encoding);
 
 	if (!(sp->wrk->res_mode & RES_CHUNKED) &&
-	    sp->wrk->busyobj->h_content_length != NULL)
+	    sp->wrk->busyobj->has_content_length &&
+	    !http_GetHdr(sp->req->resp, H_Content_Length, NULL))
 		http_PrintfHeader(sp->wrk, sp->vsl_id, sp->req->resp,
-		    "Content-Length: %s", sp->wrk->busyobj->h_content_length);
+		    "Content-Length: %zd", sp->wrk->busyobj->content_length);
 
 	sp->wrk->acct_tmp.hdrbytes +=
 	    http_Write(sp->wrk, sp->vsl_id, sp->req->resp, 1);

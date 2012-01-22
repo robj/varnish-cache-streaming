@@ -205,8 +205,8 @@ FetchStorage(struct worker *wrk, ssize_t sz)
  * Convert a string to a size_t safely
  */
 
-static ssize_t
-fetch_number(const char *nbr, int radix)
+ssize_t
+FetchNumber(const char *nbr, int radix)
 {
 	uintmax_t cll;
 	ssize_t cl;
@@ -291,7 +291,7 @@ fetch_chunked(struct worker *wrk, struct http_conn *htc)
 			return (FetchError(wrk,"chunked header no NL"));
 
 		buf[u] = '\0';
-		cl = fetch_number(buf, 16);
+		cl = FetchNumber(buf, 16);
 		if (cl < 0)
 			return (FetchError(wrk,"chunked header number syntax"));
 
@@ -534,7 +534,8 @@ FetchBody(struct worker *wrk, struct busyobj *bo)
 		mklen = 1;
 		break;
 	case BS_LENGTH:
-		cl = fetch_number(bo->h_content_length, 10);
+		AN(bo->has_content_length);
+		cl = bo->content_length;
 		bo->vfp->begin(wrk, cl > 0 ? cl : 0);
 		cls = fetch_straight(wrk, htc, cl);
 		mklen = 1;
