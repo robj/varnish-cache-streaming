@@ -190,6 +190,22 @@ SES_pool_accept_task(struct worker *wrk, void *arg)
 }
 
 /*--------------------------------------------------------------------
+ * Send a task to our pool
+ */
+
+int SES_Task(struct sess *sp, struct pool_task *task, enum pool_how how)
+{
+	struct sesspool *pp;
+
+	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+	pp = sp->sesspool;
+	CHECK_OBJ_NOTNULL(pp, SESSPOOL_MAGIC);
+	AN(pp->pool);
+
+	return (Pool_Task(pp->pool, task, how));
+}
+
+/*--------------------------------------------------------------------
  * Schedule a session back on a work-thread from its pool
  */
 
