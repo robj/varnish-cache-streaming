@@ -328,10 +328,16 @@ EXP_Rearm(const struct object *o)
  * object expires, accounting also for graceability, it is killed.
  */
 
+#ifndef EXP_TIMER_N
+#define EXP_TIMER_N 10
+#endif
+
 static void * __match_proto__(bgthread_t)
 exp_timer(struct worker *wrk, void *priv)
 {
 	struct objcore *oc;
+	struct objcore *oc_array[EXP_TIMER_N];
+	int i, n;
 	struct lru *lru;
 	double t;
 	struct object *o;
@@ -371,39 +377,56 @@ exp_timer(struct worker *wrk, void *priv)
 
 		/*
 		 * It's time...
-		 * Technically we should drop the exp_mtx, get the lru->mtx
-		 * get the exp_mtx again and then check that the oc is still
-		 * on the binheap.  We take the shorter route and try to
-		 * get the lru->mtx and punt if we fail.
+		 * Try to acquire the lru->mtx. If fail, take the long route
+		 * of releasing the lru->mtx and then getting exp_mtx and
+		 * lru->mtx in the correct order.
 		 */
 
 		lru = oc_getlru(oc);
 		CHECK_OBJ_NOTNULL(lru, LRU_MAGIC);
 		if (Lck_Trylock(&lru->mtx)) {
 			Lck_Unlock(&exp_mtx);
-			oc = NULL;
-			continue;
+
+			Lck_Lock(&lru->mtx);
+			Lck_Lock(&exp_mtx);
 		}
 
-		/* Remove from binheap */
-		assert(oc->timer_idx != BINHEAP_NOIDX);
-		binheap_delete(exp_heap, oc->timer_idx);
-		assert(oc->timer_idx == BINHEAP_NOIDX);
+		/* Now that we have the locks, scoop up all expired
+		 * objects while on the same LRU */
+		n = 0;
+		while (n < EXP_TIMER_N) {
+			oc = binheap_root(exp_heap);
+			CHECK_OBJ_ORNULL(oc, OBJCORE_MAGIC);
+			if (oc == NULL || oc_getlru(oc) != lru)
+				break;
+			if (oc->timer_when > t) {
+				oc = NULL;
+				break;
+			}
+			assert(oc->timer_idx != BINHEAP_NOIDX);
 
-		/* And from LRU */
-		lru = oc_getlru(oc);
-		VTAILQ_REMOVE(&lru->lru_head, oc, lru_list);
+			/* Remove from binheap and LRU */
+			binheap_delete(exp_heap, oc->timer_idx);
+			VTAILQ_REMOVE(&lru->lru_head, oc, lru_list);
+
+			oc_array[n++] = oc;
+		}
 
 		Lck_Unlock(&exp_mtx);
 		Lck_Unlock(&lru->mtx);
 
-		VSC_C_main->n_expired++;
-
-		CHECK_OBJ_NOTNULL(oc->objhead, OBJHEAD_MAGIC);
-		o = oc_getobj(&wrk->stats, oc);
-		VSLb(&vsl, SLT_ExpKill, "%u %.0f",
-		    oc_getxid(&wrk->stats, oc), EXP_Ttl(NULL, o) - t);
-		(void)HSH_Deref(&wrk->stats, oc, NULL);
+		/* Deref the OCs we have expired */
+		for (i = 0; i < n; i++) {
+			oc = oc_array[i];
+			CHECK_OBJ_NOTNULL(oc, OBJCORE_MAGIC);
+			CHECK_OBJ_NOTNULL(oc->objhead, OBJHEAD_MAGIC);
+			assert(oc->timer_idx == BINHEAP_NOIDX);
+			o = oc_getobj(&wrk->stats, oc);
+			VSLb(&vsl, SLT_ExpKill, "%u %.0f",
+			     oc_getxid(&wrk->stats, oc), EXP_Ttl(NULL, o) - t);
+			(void)HSH_Deref(&wrk->stats, oc, NULL);
+		}
+		VSC_C_main->n_expired += n;
 	}
 	NEEDLESS_RETURN(NULL);
 }
