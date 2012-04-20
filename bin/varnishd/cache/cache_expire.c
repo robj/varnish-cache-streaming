@@ -339,18 +339,22 @@ exp_timer(struct worker *wrk, void *priv)
 	struct objcore *oc_array[EXP_TIMER_N];
 	int i, n;
 	struct lru *lru;
-	double t;
+	double t, tlog;
 	struct object *o;
 	struct vsl_log vsl;
 
 	(void)priv;
 	VSL_Setup(&vsl, NULL, 0);
 	t = VTIM_real();
+	tlog = t;
 	oc = NULL;
 	while (1) {
-		if (oc == NULL) {
+		if (t - tlog > 0.5) {
 			VSL_Flush(&vsl, 0);
 			WRK_SumStat(wrk);
+			tlog = t;
+		}
+		if (oc == NULL) {
 			VTIM_sleep(cache_param->expiry_sleep);
 			t = VTIM_real();
 		}
@@ -367,7 +371,7 @@ exp_timer(struct worker *wrk, void *priv)
 		 * We may have expired so many objects that our timestamp
 		 * got out of date, refresh it and check again.
 		 */
-		if (oc->timer_when > t)
+		if (oc->timer_when > t || t - oc->timer_when > 0.5)
 			t = VTIM_real();
 		if (oc->timer_when > t) {
 			Lck_Unlock(&exp_mtx);
