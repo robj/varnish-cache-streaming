@@ -459,7 +459,8 @@ RES_StreamWrite(const struct sess *sp)
         low = 0;
         high = 0;
         /* check if range header is present */
-        if (params->http_range_support && http_GetHdr(sp->http, H_Range, &r))
+        if (params->http_range_support && http_GetHdr(sp->http, H_Range, &r) &&
+	    sp->obj->response == 200)
 		res_dorange(sp, r, &low, &high);
 
         if (high != 0) {
