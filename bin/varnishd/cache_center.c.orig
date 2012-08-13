@@ -1165,6 +1165,7 @@ DOT hit -> prepresp [label="deliver",style=bold,color=green]
 static int
 cnt_hit(struct sess *sp)
 {
+
 	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
 	CHECK_OBJ_NOTNULL(sp->obj, OBJECT_MAGIC);
 	CHECK_OBJ_NOTNULL(sp->vcl, VCL_CONF_MAGIC);

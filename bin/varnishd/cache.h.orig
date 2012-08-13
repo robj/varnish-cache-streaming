@@ -289,9 +289,6 @@ struct stream_ctx {
 
 	/* Max byte we can stream */
 	ssize_t			stream_max;
-
-        /* streaming started (used for ranges in streaming mode) */
-        int                     stream_started;
 };
 
 /*--------------------------------------------------------------------*/
