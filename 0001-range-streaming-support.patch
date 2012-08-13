@@ -1,0 +1,221 @@
+From 503b8dddf228ca237aa18e5fedb699721c4ef9e8 Mon Sep 17 00:00:00 2001
+From: Thomas Souvignet <thomas.souvignet@smartjog.com>
+Date: Wed, 9 Nov 2011 18:20:32 +0100
+Subject: [PATCH] range streaming support
+
+---
+ bin/varnishd/cache.h          |    3 +
+ bin/varnishd/cache_center.c   |    1 -
+ bin/varnishd/cache_response.c |   82 ++++++++++++++++++++++++++++++++++++----
+ 3 files changed, 76 insertions(+), 10 deletions(-)
+
+diff --git a/bin/varnishd/cache.h b/bin/varnishd/cache.h
+index b207434..6875c86 100644
+--- a/bin/varnishd/cache.h
++++ b/bin/varnishd/cache.h
+@@ -279,6 +279,9 @@ struct stream_ctx {
+ 
+ 	/* Max byte we can stream */
+ 	ssize_t			stream_max;
++
++        /* streaming started (used for ranges in streaming mode) */
++        int                     stream_started;
+ };
+ 
+ /*--------------------------------------------------------------------*/
+diff --git a/bin/varnishd/cache_center.c b/bin/varnishd/cache_center.c
+index 8b0215f..e69a906 100644
+--- a/bin/varnishd/cache_center.c
++++ b/bin/varnishd/cache_center.c
+@@ -1156,7 +1156,6 @@ DOT hit -> prepresp [label="deliver",style=bold,color=green]
+ static int
+ cnt_hit(struct sess *sp)
+ {
+-
+ 	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+ 	CHECK_OBJ_NOTNULL(sp->obj, OBJECT_MAGIC);
+ 	CHECK_OBJ_NOTNULL(sp->vcl, VCL_CONF_MAGIC);
+diff --git a/bin/varnishd/cache_response.c b/bin/varnishd/cache_response.c
+index c703e65..3134e3b 100644
+--- a/bin/varnishd/cache_response.c
++++ b/bin/varnishd/cache_response.c
+@@ -45,7 +45,8 @@
+ static void
+ res_dorange(const struct sess *sp, const char *r, ssize_t *plow, ssize_t *phigh)
+ {
+-	ssize_t low, high, has_low;
++        ssize_t low, high, has_low, stream_content_length;
++        char *endptr;
+ 
+ 	assert(sp->obj->response == 200);
+ 	if (strncmp(r, "bytes=", 6))
+@@ -63,9 +64,19 @@ res_dorange(const struct sess *sp, const char *r, ssize_t *plow, ssize_t *phigh)
+ 		r++;
+ 	}
+ 
+-	if (low >= sp->obj->len)
++        stream_content_length = 0;
++        if (sp->stream_busyobj) {
++                stream_content_length = strtol(sp->stream_busyobj->stream_h_content_length, &endptr, 0);
++                if (sp->stream_busyobj->stream_h_content_length == endptr)
++                        return;
++        }
++
++	if (low >= sp->obj->len && sp->stream_busyobj == NULL)
+ 		return;
+ 
++        if (sp->stream_busyobj && low >= stream_content_length)
++                return;
++
+ 	if (*r != '-')
+ 		return;
+ 	r++;
+@@ -79,23 +90,25 @@ res_dorange(const struct sess *sp, const char *r, ssize_t *plow, ssize_t *phigh)
+ 			r++;
+ 		}
+ 		if (!has_low) {
+-			low = sp->obj->len - high;
+-			high = sp->obj->len - 1;
++                        low = (sp->stream_busyobj ? stream_content_length : sp->obj->len) - high;
++			high = (sp->stream_busyobj ? stream_content_length : sp->obj->len) - 1;
+ 		}
+ 	} else
+-		high = sp->obj->len - 1;
++		high = (sp->stream_busyobj ? stream_content_length : sp->obj->len) - 1;
+ 	if (*r != '\0')
+ 		return;
+ 
+-	if (high >= sp->obj->len)
++	if (high >= sp->obj->len && sp->stream_busyobj == NULL)
+ 		high = sp->obj->len - 1;
++        if (sp->stream_busyobj && high >= stream_content_length)
++                high = stream_content_length - 1;
+ 
+ 	if (low > high)
+ 		return;
+ 
+ 	http_PrintfHeader(sp->wrk, sp->fd, sp->wrk->resp,
+ 	    "Content-Range: bytes %jd-%jd/%jd",
+-	    (intmax_t)low, (intmax_t)high, (intmax_t)sp->obj->len);
++	    (intmax_t)low, (intmax_t)high, (intmax_t)(sp->stream_busyobj ? stream_content_length : sp->obj->len));
+ 	http_Unset(sp->wrk->resp, H_Content_Length);
+ 	assert(sp->wrk->res_mode & RES_LEN);
+ 	http_PrintfHeader(sp->wrk, sp->fd, sp->wrk->resp,
+@@ -331,6 +344,9 @@ RES_WriteObj(struct sess *sp)
+ void
+ RES_StreamStart(struct sess *sp)
+ {
++	char *r;
++	ssize_t low, high;
++
+ 	AZ(sp->wrk->res_mode & RES_ESI_CHILD);
+ 
+ 	WRW_Reserve(sp->wrk, &sp->fd);
+@@ -350,11 +366,22 @@ RES_StreamStart(struct sess *sp)
+ 	if (sp->wrk->res_mode & RES_GUNZIP)
+ 		http_Unset(sp->wrk->resp, H_Content_Encoding);
+ 
++        low = 0;
++        high = 0;
++	if (
++	    sp->wantbody &&
++	    (sp->wrk->res_mode & RES_LEN) &&
++	    !(sp->wrk->res_mode & (RES_ESI|RES_ESI_CHILD|RES_GUNZIP)) &&
++	    params->http_range_support &&
++	    sp->obj->response == 200 &&
++	    http_GetHdr(sp->http, H_Range, &r))
++		res_dorange(sp, r, &low, &high);
++
+ 	if (!sp->wantbody)
+ 		sp->wrk->res_mode &= ~RES_CHUNKED;
+ 
+ 	if (!(sp->wrk->res_mode & RES_CHUNKED) &&
+-	    sp->wrk->h_content_length != NULL && sp->wantbody)
++	    sp->wrk->h_content_length != NULL && sp->wantbody && low == 0 && high == 0)
+ 		http_PrintfHeader(sp->wrk, sp->fd, sp->wrk->resp,
+ 		    "Content-Length: %s", sp->wrk->h_content_length);
+ 
+@@ -418,8 +445,9 @@ RES_StreamWrite(const struct sess *sp)
+ {
+ 	struct stream_ctx *sctx;
+ 	struct storage *st;
+-	ssize_t l, l2, stlen;
++	ssize_t l, l2, stlen, low, high;
+ 	void *ptr;
++        char *r;
+ 
+ 	sctx = sp->wrk->sctx;
+ 	CHECK_OBJ_NOTNULL(sctx, STREAM_CTX_MAGIC);
+@@ -428,10 +456,32 @@ RES_StreamWrite(const struct sess *sp)
+ 		return;
+ 	assert(sctx->stream_max > sctx->stream_next);
+ 
++        low = 0;
++        high = 0;
++        /* check if range header is present */
++        if (http_GetHdr(sp->http, H_Range, &r))
++		res_dorange(sp, r, &low, &high);
++
++        if (high != 0) {
++                high++;
++        }
++
++        /* check if the range is already present or if we have to wait for more data */
++        if (low && high && (low >= sctx->stream_max || high > sctx->stream_max))
++                return;
++
++        /* check if we are just starting to stream or if we already started in a previous call */
++        if (high != 0 && sctx->stream_started == 0) {
++                sctx->stream_next = low; /* set next byte to stream as the first byte of range */
++                sctx->stream_started = 1; /* set stream as started */
++        }
++
++
+ 	l = sctx->stream_front;
+ 	st = sctx->stream_frontchunk;
+ 	if (st == NULL)
+ 		st = VTAILQ_FIRST(&sp->obj->store);
++
+ 	for (; st != NULL; st = VTAILQ_NEXT(st, list)) {
+ 		CHECK_OBJ_NOTNULL(st, STORAGE_MAGIC);
+ 		sctx->stream_front = l;
+@@ -452,6 +502,11 @@ RES_StreamWrite(const struct sess *sp)
+ 		l2 = l + stlen - sctx->stream_next;
+ 		if (sctx->stream_next + l2 > sctx->stream_max)
+ 			l2 = sctx->stream_max - sctx->stream_next;
++
++                /* Ensure we stream just the requested range */
++                if (high && sctx->stream_next + l2 > high)
++                        l2 = high - sctx->stream_next;
++
+ 		assert(l2 > 0);
+ 		ptr = st->ptr + (sctx->stream_next - l);
+ 		if (sp->wrk->res_mode & RES_GUNZIP) {
+@@ -461,8 +516,14 @@ RES_StreamWrite(const struct sess *sp)
+ 			(void)WRW_Write(sp->wrk, ptr, l2);
+ 		}
+ 		sctx->stream_next += l2;
++
+ 		if (sctx->stream_next == sctx->stream_max)
+ 			break;
++
++                /* Check if we sent enough data, if so get out of here */
++                if (high && sctx->stream_next == high)
++                        break;
++
+ 		assert(sctx->stream_next < sctx->stream_max);
+ 		AN(VTAILQ_NEXT(st, list));
+ 		l += stlen;
+@@ -543,6 +604,9 @@ RES_StreamBody(struct sess *sp)
+ 		sctx.obuf_len = sizeof (obuf);
+ 	}
+ 
++        /* Set stream as starting */
++        sctx.stream_started = 0;
++
+ 	fast_writer = 0;
+ 	Lck_Lock(&bo->mtx);
+ 	while (!bo->stream_stop || sctx.stream_next < bo->stream_max) {
+-- 
+1.7.2.3
+
