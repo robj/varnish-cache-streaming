@@ -1,0 +1,26 @@
+>From c3d616a2309505ef3ff41bfb037e575828b9f863 Mon Sep 17 00:00:00 2001
+From: Jocelyn De La Rosa <jocelyn.delarosa@smartjog.com>
+Date: Mon, 6 Feb 2012 16:06:31 +0100
+Subject: [PATCH 3/3] Add object response check to range support
+
+---
+ bin/varnishd/cache_response.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/bin/varnishd/cache_response.c b/bin/varnishd/cache_response.c
+index 61746d6..4c5f207 100644
+--- a/bin/varnishd/cache_response.c
++++ b/bin/varnishd/cache_response.c
+@@ -459,7 +459,8 @@ RES_StreamWrite(const struct sess *sp)
+         low = 0;
+         high = 0;
+         /* check if range header is present */
+-        if (params->http_range_support && http_GetHdr(sp->http, H_Range, &r))
++        if (params->http_range_support && http_GetHdr(sp->http, H_Range, &r) &&
++	    sp->obj->response == 200)
+ 		res_dorange(sp, r, &low, &high);
+ 
+         if (high != 0) {
+-- 
+1.7.2.5
+
