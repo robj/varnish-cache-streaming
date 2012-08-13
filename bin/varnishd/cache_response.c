@@ -522,8 +522,10 @@ RES_StreamWrite(const struct sess *sp)
 			break;
 
                 /* Check if we sent enough data, if so get out of here */
-                if (high && sctx->stream_next == high)
-                        break;
+                if (high && sctx->stream_next == high) {
+			sctx->stream_started = 2;
+			break;
+                }
 
 		assert(sctx->stream_next < sctx->stream_max);
 		AN(VTAILQ_NEXT(st, list));
@@ -627,7 +629,10 @@ RES_StreamBody(struct sess *sp)
 		sctx.stream_max = bo->stream_max;
 		assert(sctx.stream_max >= sctx.stream_next);
 		Lck_Unlock(&bo->mtx);
-		RES_StreamWrite(sp);
+		if (sctx.stream_started != 2)
+			RES_StreamWrite(sp);
+		else
+			sctx.stream_next = bo->stream_max;
 		Lck_Lock(&bo->mtx);
 		if (fast_writer) {
 			bo->stream_tokens++;
